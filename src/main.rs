@@ -1,5 +1,9 @@
+use std::error::Error;
+
 use axum::{Json, Router, extract::Path, http::StatusCode, response::IntoResponse, routing::get};
+use dotenvy::dotenv;
 use serde_json::{Value, json};
+use sqlx::{Row, Connection};
 
 #[derive(Debug)]
 enum ApiError {
@@ -52,6 +56,16 @@ async fn get_user(Path(id): Path<u32>) -> Result<Json<Value>, ApiError> {
 
 #[tokio::main]
 async fn main() {
+    dotenv().ok();
+
+    // db conn
+    println!("connecting to db");
+    let url = std::env::var("DATABASE_URL").expect("DATABASE_URL not set");
+    let pool = sqlx::postgres::PgPool::connect(&url)
+        .await
+        .expect("failed to connect to db");
+    println!("db connected");
+    
     let app = create_app();
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3000")
