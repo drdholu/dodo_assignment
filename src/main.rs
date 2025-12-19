@@ -1,14 +1,25 @@
-use std::error::Error;
-
-use axum::{Json, Router, extract::Path, http::StatusCode, response::IntoResponse, routing::get};
-use dotenvy::dotenv;
+use axum::{
+    Json,
+    Router,
+    extract::{Path, State},
+    http::StatusCode,
+    response::IntoResponse,
+    routing::get,
+};
 use serde_json::{Value, json};
-use sqlx::{Row, Connection};
+use sqlx::PgPool;
+
+use dodo_assign::{config::Config, db::pool::create_pool};
+
+#[derive(Clone)]
+struct AppState {
+    pool: PgPool,
+}
 
 #[derive(Debug)]
 enum ApiError {
     NotFound, // 404
-    InvalidInput(String), // 400
+    // InvalidInput(String), // 400
     InternalError // 500
 }
 
@@ -21,9 +32,9 @@ impl IntoResponse for ApiError {
             ApiError::InternalError => (
                 StatusCode::INTERNAL_SERVER_ERROR, "Internal Sevrer error".to_string()
             ),
-            ApiError::InvalidInput(msg) => (
-                StatusCode::BAD_REQUEST, msg
-            )
+            // ApiError::InvalidInput(msg) => (
+            //     StatusCode::BAD_REQUEST, msg
+            // )
         };
 
         let body = Json(json!({
@@ -43,10 +54,24 @@ async fn health_check() -> impl IntoResponse {
     }))
 }
 
-fn create_app() -> Router {
+async fn db_health_check(State(state): State<AppState>) -> Result<impl IntoResponse, ApiError> {
+    sqlx::query("SELECT 1")
+        .execute(&state.pool)
+        .await
+        .map_err(|_| ApiError::InternalError)?;
+
+    Ok(Json(json!({
+        "status": "OK",
+        "message": "DB reachable"
+    })))
+}
+
+fn create_app(state: AppState) -> Router {
     Router::new()
         .route("/health", get(health_check))
+        .route("/health/db", get(db_health_check))
         .route("/user/{id}", get(get_user))
+        .with_state(state)
 }
 
 async fn get_user(Path(id): Path<u32>) -> Result<Json<Value>, ApiError> {
@@ -56,24 +81,22 @@ async fn get_user(Path(id): Path<u32>) -> Result<Json<Value>, ApiError> {
 
 #[tokio::main]
 async fn main() {
-    dotenv().ok();
+    let config = Config::from_env();
 
-    // db conn
     println!("connecting to db");
-    let url = std::env::var("DATABASE_URL").expect("DATABASE_URL not set");
-    let pool = sqlx::postgres::PgPool::connect(&url)
-        .await
-        .expect("failed to connect to db");
+    let pool = create_pool(&config.database_url).await;
     println!("db connected");
-    
-    let app = create_app();
 
-    let listener = tokio::net::TcpListener::bind("0.0.0.0:3000")
+    let state = AppState { pool };
+    let app = create_app(state);
+
+    let bind_addr = format!("0.0.0.0:{}", config.server_port);
+    let listener = tokio::net::TcpListener::bind(&bind_addr)
         .await
         .expect("failed to bind tcp lisenter");
 
 
-    println!("server running");
+    println!("server running on {bind_addr}");
 
     // connect listener to app
     axum::serve(listener, app)
