@@ -6,7 +6,12 @@ use axum::{
 use hmac::{Hmac, Mac};
 use sha2::Sha256;
 
-use crate::{error::ApiError, state::AppState};
+use crate::{
+    db,
+    error::ApiError,
+    models::api_key::ApiKeyLookup,
+    state::AppState,
+};
 
 #[derive(Clone, Debug)]
 pub struct BusinessContext {
@@ -20,6 +25,7 @@ pub async fn api_key_auth(
     next: Next,
 ) -> Result<Response, ApiError> {
 
+    // println!("here");
     let raw_api_key = req
         .headers()
         .get("X-API-Key")
@@ -30,20 +36,17 @@ pub async fn api_key_auth(
 
     let key_hash = hmac_sha256_hex(&state.hmac_secret, raw_api_key);
 
-    let q = "SELECT id, business_id FROM api_keys WHERE key_hash = $1 AND revoked_at IS NULL";
-    let row: Option<(uuid::Uuid, uuid::Uuid)> = sqlx::query_as(q)
-        .bind(&key_hash)
-        .fetch_optional(&state.pool)
+    let api_key: ApiKeyLookup = db::find_active_api_key_by_hash(&state.pool, &key_hash)
         .await
-        .map_err(|_| ApiError::InternalError)?;
-
-    let (api_key_id, business_id) = row.ok_or(ApiError::Unauthorized)?;
+        .map_err(|_| ApiError::InternalError)?
+        .ok_or(ApiError::Unauthorized)?;
 
     req.extensions_mut().insert(BusinessContext {
-        business_id,
-        api_key_id,
+        business_id: api_key.business_id,
+        api_key_id: api_key.id,
     });
 
+    // println!("here 2");
     Ok(next.run(req).await)
 }
 

@@ -1,31 +1,30 @@
 use axum::{
-    Json,
     Router,
-    extract::Path,
     middleware::from_fn_with_state,
-    routing::get,
+    routing::{get, post},
 };
-use serde_json::{Value, json};
 
 use dodo_assign::{
     config::Config,
     db::pool::create_pool,
-    error::ApiError,
     handlers::health::{db_health_check, health_check},
     middleware::auth::api_key_auth,
     state::AppState,
+    handlers::accounts,
 };
 
 fn create_app(state: AppState) -> Router {
     let protected = Router::new()
-        //TODO accounts/transactions routes go here
+        .route("/create-account", post(accounts::create_account))
+        .route("/accounts", get(accounts::list_accounts))
+        .route("/accounts/{id}", get(accounts::get_account))
         .layer(from_fn_with_state(state.clone(), api_key_auth));
 
     Router::new()
         .route("/health", get(health_check))
         .route("/health/db", get(db_health_check))
         .nest("/api", protected)
-        .with_state(state)
+        .with_state(state.clone())
 }
 
 #[tokio::main]
