@@ -21,9 +21,18 @@ The API listens on `http://localhost:3000`.
 ## Configuration
 
 Required environment variables (set in `.env` file):
-- `DATABASE_URL` - Postgres connection string (e.g., `postgresql://appuser:apppassword@postgres:5432/appdb`)
+- `DATABASE_URL` - Postgres connection string
 - `HMAC_SECRET` - Secret for API key hashing
 - `SERVER_PORT` - HTTP server port (defaults to `3000` if not set)
+
+**Important: DATABASE_URL depends on where the app runs:**
+
+- **Docker (app container → postgres container)**: Use `postgresql://appuser:apppassword@postgres:5432/appdb`
+  - `postgres` = service name in docker-compose.yml
+  - `5432` = internal Postgres port
+- **Host machine (cargo run → postgres container)**: Use `postgresql://appuser:apppassword@localhost:5433/appdb`
+  - `localhost` = host machine
+  - `5433` = host-mapped port (from docker-compose.yml)
 
 Docker Compose loads these from the `.env` file. For local (non-docker) runs, create a `.env` using the values in `.env.example`.
 
