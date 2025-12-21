@@ -7,10 +7,13 @@ use axum::{
 use dodo_assign::{
     config::Config,
     db::pool::create_pool,
-    handlers::health::{db_health_check, health_check},
+    handlers::{
+        accounts,
+        health::{db_health_check, health_check},
+        transactions,
+    },
     middleware::auth::api_key_auth,
     state::AppState,
-    handlers::accounts,
 };
 
 fn create_app(state: AppState) -> Router {
@@ -18,6 +21,9 @@ fn create_app(state: AppState) -> Router {
         .route("/create-account", post(accounts::create_account))
         .route("/accounts", get(accounts::list_accounts))
         .route("/accounts/{id}", get(accounts::get_account))
+        .route("/transactions", post(transactions::create_transaction_handler))
+        .route("/transactions", get(transactions::list_transactions))
+        .route("/transactions/{id}", get(transactions::get_transaction))
         .layer(from_fn_with_state(state.clone(), api_key_auth));
 
     Router::new()
