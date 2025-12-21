@@ -1,7 +1,7 @@
 use axum::{
     Router,
     middleware::from_fn_with_state,
-    routing::{get, post},
+    routing::{delete, get, post},
 };
 
 use dodo_assign::{
@@ -11,9 +11,11 @@ use dodo_assign::{
         accounts,
         health::{db_health_check, health_check},
         transactions,
+        webhooks,
     },
     middleware::auth::api_key_auth,
     state::AppState,
+    worker::webhook_worker,
 };
 
 fn create_app(state: AppState) -> Router {
@@ -24,6 +26,9 @@ fn create_app(state: AppState) -> Router {
         .route("/transactions", post(transactions::create_transaction_handler))
         .route("/transactions", get(transactions::list_transactions))
         .route("/transactions/{id}", get(transactions::get_transaction))
+        .route("/webhooks", post(webhooks::create_webhook_endpoint))
+        .route("/webhooks", get(webhooks::list_webhook_endpoints))
+        .route("/webhooks/{id}", delete(webhooks::delete_webhook_endpoint))
         .layer(from_fn_with_state(state.clone(), api_key_auth));
 
     Router::new()
@@ -41,10 +46,22 @@ async fn main() {
     let pool = create_pool(&config.database_url).await;
     println!("db connected");
 
+    println!("running migrations");
+    sqlx::migrate!("./migrations")
+        .run(&pool)
+        .await
+        .expect("failed to run migrations");
+    println!("migrations complete");
+
     let state = AppState {
         pool,
         hmac_secret: config.hmac_secret,
     };
+
+    let worker_state = state.clone();
+    tokio::spawn(async move {
+        webhook_worker::run(worker_state.pool).await;
+    });
 
     let app = create_app(state);
 

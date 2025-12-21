@@ -4,6 +4,7 @@ use chrono::{DateTime, Utc};
 use sqlx::{PgPool, Postgres, Transaction as SqlxTransaction};
 
 use crate::models::transaction::{CreateTransactionRequest, Transaction, TransactionType};
+use crate::services::webhook_service::enqueue_transaction_created_events_best_effort;
 
 #[derive(Debug)]
 pub enum TransactionError {
@@ -170,7 +171,7 @@ pub async fn create_transaction(
 
             tx.commit().await.map_err(|_| TransactionError::Internal)?;
 
-            Ok(Transaction {
+            let out = Transaction {
                 id,
                 business_id,
                 tx_type,
@@ -178,7 +179,11 @@ pub async fn create_transaction(
                 dest_account_id: Some(dest_id),
                 amount,
                 created_at,
-            })
+            };
+
+            enqueue_transaction_created_events_best_effort(pool, business_id, &out).await;
+
+            Ok(out)
         }
         TransactionType::Debit => {
             let source_id = source_account_id.unwrap();
@@ -217,7 +222,7 @@ pub async fn create_transaction(
 
             tx.commit().await.map_err(|_| TransactionError::Internal)?;
 
-            Ok(Transaction {
+            let out = Transaction {
                 id,
                 business_id,
                 tx_type,
@@ -225,7 +230,11 @@ pub async fn create_transaction(
                 dest_account_id: None,
                 amount,
                 created_at,
-            })
+            };
+
+            enqueue_transaction_created_events_best_effort(pool, business_id, &out).await;
+
+            Ok(out)
         }
         TransactionType::Transfer => {
             let source_id = source_account_id.unwrap();
@@ -292,7 +301,7 @@ pub async fn create_transaction(
 
             tx.commit().await.map_err(|_| TransactionError::Internal)?;
 
-            Ok(Transaction {
+            let out = Transaction {
                 id,
                 business_id,
                 tx_type,
@@ -300,7 +309,11 @@ pub async fn create_transaction(
                 dest_account_id: Some(dest_id),
                 amount,
                 created_at,
-            })
+            };
+
+            enqueue_transaction_created_events_best_effort(pool, business_id, &out).await;
+
+            Ok(out)
         }
     }
 }

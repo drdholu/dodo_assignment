@@ -8,6 +8,7 @@ use chrono::{DateTime, Utc};
 use crate::models::api_key::ApiKeyLookup;
 use crate::models::account::Account;
 use crate::models::transaction::{Transaction, TransactionType};
+use crate::models::webhook::WebhookEndpoint;
 
 pub async fn find_active_api_key_by_hash(
     pool: &PgPool,
@@ -181,5 +182,179 @@ pub async fn get_transaction(
         amount,
         created_at,
     }))
+}
+
+pub async fn create_webhook_endpoint(
+    pool: &PgPool,
+    business_id: Uuid,
+    url: &str,
+) -> Result<WebhookEndpoint, sqlx::Error> {
+    let q = r#"
+        INSERT INTO webhook_endpoints (business_id, url, secret, active)
+        VALUES ($1, $2, '', true)
+        RETURNING id, business_id, url, active, created_at
+    "#;
+
+    let row: (Uuid, Uuid, String, bool, DateTime<Utc>) = sqlx::query_as(q)
+        .bind(business_id)
+        .bind(url)
+        .fetch_one(pool)
+        .await?;
+
+    Ok(WebhookEndpoint {
+        id: row.0,
+        business_id: row.1,
+        url: row.2,
+        active: row.3,
+        created_at: row.4,
+    })
+}
+
+pub async fn list_webhook_endpoints(
+    pool: &PgPool,
+    business_id: Uuid,
+) -> Result<Vec<WebhookEndpoint>, sqlx::Error> {
+    let q = r#"
+        SELECT id, business_id, url, active, created_at
+        FROM webhook_endpoints
+        WHERE business_id = $1
+        ORDER BY created_at DESC
+    "#;
+
+    let rows: Vec<(Uuid, Uuid, String, bool, DateTime<Utc>)> = sqlx::query_as(q)
+        .bind(business_id)
+        .fetch_all(pool)
+        .await?;
+
+    Ok(rows
+        .into_iter()
+        .map(|(id, business_id, url, active, created_at)| WebhookEndpoint {
+            id,
+            business_id,
+            url,
+            active,
+            created_at,
+        })
+        .collect())
+}
+
+pub async fn deactivate_webhook_endpoint(
+    pool: &PgPool,
+    business_id: Uuid,
+    endpoint_id: Uuid,
+) -> Result<bool, sqlx::Error> {
+    let q = r#"
+        UPDATE webhook_endpoints
+        SET active = false
+        WHERE id = $1 AND business_id = $2
+    "#;
+
+    let result = sqlx::query(q)
+        .bind(endpoint_id)
+        .bind(business_id)
+        .execute(pool)
+        .await?;
+
+    Ok(result.rows_affected() > 0)
+}
+
+pub async fn enqueue_webhook_events_for_transaction(
+    pool: &PgPool,
+    business_id: Uuid,
+    transaction_id: Uuid,
+    payload_json: &str,
+) -> Result<u64, sqlx::Error> {
+    let q = r#"
+        INSERT INTO webhook_events (endpoint_id, transaction_id, payload)
+        SELECT id, $2, $3::jsonb
+        FROM webhook_endpoints
+        WHERE business_id = $1 AND active = true
+    "#;
+
+    let result = sqlx::query(q)
+        .bind(business_id)
+        .bind(transaction_id)
+        .bind(payload_json)
+        .execute(pool)
+        .await?;
+
+    Ok(result.rows_affected())
+}
+
+#[derive(Debug, Clone)]
+pub struct DueWebhookEvent {
+    pub event_id: Uuid,
+    pub url: String,
+    pub payload_json: String,
+    pub attempts: i32,
+}
+
+pub async fn fetch_due_webhook_events(
+    pool: &PgPool,
+    limit: i64,
+) -> Result<Vec<DueWebhookEvent>, sqlx::Error> {
+    let q = r#"
+        SELECT
+            e.id AS event_id,
+            w.url,
+            e.payload::text AS payload_json,
+            e.attempts
+        FROM webhook_events e
+        JOIN webhook_endpoints w ON w.id = e.endpoint_id
+        WHERE
+            e.status = 'pending'
+            AND (e.next_retry_at IS NULL OR e.next_retry_at <= now())
+            AND w.active = true
+        ORDER BY e.created_at ASC
+        LIMIT $1
+    "#;
+
+    let rows: Vec<(Uuid, String, String, i32)> = sqlx::query_as(q)
+        .bind(limit)
+        .fetch_all(pool)
+        .await?;
+
+    Ok(rows
+        .into_iter()
+        .map(|(event_id, url, payload_json, attempts)| DueWebhookEvent {
+            event_id,
+            url,
+            payload_json,
+            attempts,
+        })
+        .collect())
+}
+
+pub async fn mark_webhook_event_delivered(pool: &PgPool, event_id: Uuid) -> Result<(), sqlx::Error> {
+    let q = r#"
+        UPDATE webhook_events
+        SET status = 'delivered', next_retry_at = NULL
+        WHERE id = $1
+    "#;
+    sqlx::query(q).bind(event_id).execute(pool).await?;
+    Ok(())
+}
+
+pub async fn mark_webhook_event_failed(
+    pool: &PgPool,
+    event_id: Uuid,
+    attempts: i32,
+    next_retry_at: Option<DateTime<Utc>>,
+    terminal: bool,
+) -> Result<(), sqlx::Error> {
+    let status = if terminal { "failed" } else { "pending" };
+    let q = r#"
+        UPDATE webhook_events
+        SET status = $2::webhook_status, attempts = $3, next_retry_at = $4
+        WHERE id = $1
+    "#;
+    sqlx::query(q)
+        .bind(event_id)
+        .bind(status)
+        .bind(attempts)
+        .bind(next_retry_at)
+        .execute(pool)
+        .await?;
+    Ok(())
 }
 

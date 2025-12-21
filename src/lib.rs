@@ -6,3 +6,4 @@ pub mod services;
 pub mod state;
 pub mod middleware;
 pub mod handlers;
+pub mod worker;
