@@ -2,6 +2,8 @@
 
 Minimal transaction service (Rust + Axum + Postgres).
 
+**Note:** AI coding assistants were used during development to help with Rust syntax and implementation patterns, as the author is relatively new to Rust.
+
 ## Run with Docker (one-command)
 
 From the repo root:
@@ -51,5 +53,4 @@ See `plans/creds&cmd.md` for auth setup + curl examples (accounts, transactions,
 
 - `DESIGN.md`: design decisions, schema, reliability/security notes
 - `API.md`: HTTP API reference (endpoints, schemas, examples)
-
 
