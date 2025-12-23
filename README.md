@@ -8,17 +8,61 @@ Minimal transaction service (Rust + Axum + Postgres).
 
 From the repo root:
 
+### create env file
+
 First time only (create `.env`):
 
 ```bash
 cp .env.example .env
 ```
 
+### docker compose
+
 ```bash
 docker compose up --build
 ```
 
-The API listens on `http://localhost:3000`.
+
+### inserting test business in db
+
+
+1. `\set hmac_secret 'super-secret-string'` (check .env for hmac_secret)
+
+
+2. run inside the psql shell
+
+```sql
+BEGIN;
+
+-- Needed for hmac(); safe to run multiple times
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
+WITH new_business AS (
+  INSERT INTO businesses (name)
+  VALUES ('Acme Test Business')
+  RETURNING id
+),
+new_api_key AS (
+  INSERT INTO api_keys (business_id, key_hash, key_prefix)
+  SELECT
+    b.id,
+    encode(hmac('dk_test_1234567890abcdef', :'hmac_secret', 'sha256'), 'hex'),
+    substring('dk_test_1234567890abcdef' from 1 for 8)
+  FROM new_business b
+  RETURNING id, business_id, key_prefix
+)
+SELECT
+  b.id          AS business_id,
+  k.id          AS api_key_id,
+  k.key_prefix  AS key_prefix
+FROM new_business b
+JOIN new_api_key k ON k.business_id = b.id;
+
+COMMIT;
+```
+
+
+> The API listens on `http://localhost:3000`.
 
 ## Configuration
 
@@ -46,8 +90,6 @@ Health:
 curl -sS "http://localhost:3000/health"
 curl -sS "http://localhost:3000/health/db"
 ```
-
-See `plans/creds&cmd.md` for auth setup + curl examples (accounts, transactions, webhooks).
 
 ## Docs
 
