@@ -26,10 +26,12 @@ docker compose up --build
 ### inserting test business in db
 
 
-1. `\set hmac_secret 'super-secret-string'` (check .env for hmac_secret)
+1. `docker exec -it dodo_postgres psql -U appuser appdb`
+
+2. `\set hmac_secret 'super-secret-string'` (check .env for hmac_secret)
 
 
-2. run inside the psql shell
+3. run inside the psql shell
 
 ```sql
 BEGIN;
